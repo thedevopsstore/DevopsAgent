@@ -1,0 +1,24 @@
+[project]
+name = "devops-agent"
+version = "0.1.0"
+description = "DevOps Supervisor Agent with A2A Protocol"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "strands-agents[a2a]>=1.18.0",
+    "strands-agents-tools",
+    "streamlit",
+    "boto3",
+    "python-dotenv",
+    "mcp",
+    "httpx",
+    "pydantic-settings",
+    "a2a-sdk",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+    "black",
+    "isort",
+]
