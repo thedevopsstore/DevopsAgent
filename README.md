@@ -20,10 +20,9 @@ The system follows a Supervisor-Worker pattern:
 ```mermaid
 graph TD
     User[User] <--> UI[Streamlit UI]
-    UI <-->|"A2A Protocol (JSON-RPC)"| Server[Agent Server]
+    UI <-->|"A2A Protocol (JSON-RPC)"| Supervisor[Supervisor Agent]
     
     subgraph "Backend"
-        Server --> Supervisor[Supervisor Agent]
         Supervisor -->|Delegates| AWS[AWS CloudWatch Agent]
     end
 ```

@@ -10,12 +10,11 @@ The system is built on the **Strands** framework and uses the **Agent-to-Agent (
 ```mermaid
 graph TD
     User[User] <--> UI[Streamlit UI]
-    UI <-->|"A2A Protocol (JSON-RPC)"| Server[Agent Server]
+    UI <-->|"A2A Protocol (JSON-RPC)"| Supervisor[Supervisor Agent]
     
     subgraph "Backend (Python/Strands)"
-        Server --> Supervisor[Supervisor Agent]
         Supervisor -->|Delegates| AWS[AWS CloudWatch Agent]
-        Supervisor -->|Delegates| Email["Email Agent (Future)"]"
+        Supervisor -->|Delegates| Email["Email Agent (Future)"]
         
         AWS -->|Boto3| CloudWatch[AWS CloudWatch API]
         AWS -->|Boto3| Logs[AWS CloudWatch Logs]
