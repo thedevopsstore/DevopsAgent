@@ -11,32 +11,34 @@ email_mcp_client = None
 
 async def initialize_subagents():
     """Initialize all subagents"""
+    global email_mcp_client
+    
     print("🚀 Initializing Subagents...")
     await aws_agent.initialize()
     
-    # global email_mcp_client
-    # if settings.EMAIL_MCP_SERVER_URL and settings.EMAIL_POLL_INTERVAL > 0:
-    #     try:
-    #         print(f"📧 Connecting to Email MCP: {settings.EMAIL_MCP_SERVER_URL}")
-    #         email_mcp_client = MCPClient(
-    #             lambda: streamablehttp_client(
-    #                 settings.EMAIL_MCP_SERVER_URL,
-    #                 timeout=200,
-    #                 sse_read_timeout=200
-    #             )
-    #         )
-    #         email_mcp_client.__enter__()
-    #         print("✅ Email MCP Client initialized!")
-    #     except Exception as e:
-    #         print(f"⚠️  Failed to initialize Email MCP: {e}")
-    #         email_mcp_client = None
+    if settings.EMAIL_MCP_SERVER_URL:
+        try:
+            print(f"📧 Connecting to Email MCP: {settings.EMAIL_MCP_SERVER_URL}")
+            email_mcp_client = MCPClient(
+                lambda: streamablehttp_client(
+                    settings.EMAIL_MCP_SERVER_URL,
+                    timeout=200,
+                    sse_read_timeout=200
+                )
+            )
+            email_mcp_client.__enter__()
+            print("✅ Email MCP Client initialized!")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize Email MCP: {e}")
+            email_mcp_client = None
 
 async def cleanup_subagents():
     """Cleanup subagents"""
+    global email_mcp_client
+    
     await aws_agent.cleanup()
-    # global email_mcp_client
-    # if email_mcp_client:
-    #     email_mcp_client.__exit__(None, None, None)
+    if email_mcp_client:
+        email_mcp_client.__exit__(None, None, None)
 
 @tool
 async def aws_cloudwatch_tool(query: str) -> str:

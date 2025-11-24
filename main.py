@@ -3,6 +3,7 @@ import logging
 import signal
 from core.config import settings
 from core.server import AgentServer
+from core.email_polling import start_email_polling, stop_email_polling
 from agents.supervisor import create_supervisor_agent, initialize_subagents, cleanup_subagents
 
 # Configure logging
@@ -24,6 +25,11 @@ async def main():
     
     # Start server
     await server.start()
+    
+    # Start email polling (if configured)
+    email_task = await start_email_polling(
+        multi_session_manager=server.session_manager
+    )
     
     print("\n" + "=" * 60)
     print("🎯 DevOps Supervisor Agent Server Running!")
@@ -50,6 +56,7 @@ async def main():
         logger.error(f"Error in main loop: {e}", exc_info=True)
     finally:
         print("\n🧹 Shutting down...")
+        await stop_email_polling()
         await server.stop()
         await cleanup_subagents()
         print("✅ Shutdown complete!")
