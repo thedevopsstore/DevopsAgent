@@ -43,7 +43,7 @@ async def aws_cloudwatch_tool(query: str) -> str:
     """Handle AWS CloudWatch-related queries"""
     return await aws_agent.run_conversation(query)
 
-def create_supervisor_agent(session_manager) -> Agent:
+def create_supervisor_agent(session_manager, conversation_manager=None) -> Agent:
     """Create the supervisor agent instance"""
     model = BedrockModel(
         model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
@@ -67,5 +67,6 @@ def create_supervisor_agent(session_manager) -> Agent:
         tools=tools,
         system_prompt=prompt,
         session_manager=session_manager,
+        conversation_manager=conversation_manager,  # Context window management
         description="DevOps Supervisor Agent that coordinates specialized agents for infrastructure monitoring and management."
     )

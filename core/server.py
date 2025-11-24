@@ -6,6 +6,7 @@ from pathlib import Path
 from strands import Agent
 from strands.multiagent.a2a import A2AServer
 from strands.session.file_session_manager import FileSessionManager
+from strands.conversation import SummarizingConversationManager
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -30,15 +31,21 @@ class MultiSessionManager:
                 # Create session file path
                 session_file = SESSION_DIR / f"{session_id}.json"
                 
-                # Create FileSessionManager for this session
+                # Create FileSessionManager for this session (persistence)
                 session_manager = FileSessionManager(
                     session_id=session_id,
                     session_file=str(session_file)
                 )
                 self.session_managers[session_id] = session_manager
                 
-                # Create agent for this session
-                agent = self.agent_factory(session_manager)
+                # Create SummarizingConversationManager (context window management)
+                conversation_manager = SummarizingConversationManager(
+                    summary_ratio=0.4,  # Summarize 40% of messages when context reduction is needed
+                    preserve_recent_messages=10,  # Always keep 10 most recent messages
+                )
+                
+                # Create agent for this session with both managers
+                agent = self.agent_factory(session_manager, conversation_manager)
                 self.agents[session_id] = agent
                 
                 logger.info(f"📁 Created new session: {session_id}")

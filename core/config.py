@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     
     # AWS Configuration
     AWS_REGION: str = "us-east-1"
+    AWS_API_MCP_SERVER_URL: Optional[str] = None
     
     # Email Configuration (Optional)
     EMAIL_MCP_SERVER_URL: str = "http://localhost:8100/message"
