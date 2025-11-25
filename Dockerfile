@@ -21,11 +21,9 @@ COPY . .
 EXPOSE 9000
 EXPOSE 8501
 
-# Create a startup script
-RUN echo '#!/bin/bash\n\
-python main.py & \n\
-streamlit run ui/app.py --server.port 8501 --server.address 0.0.0.0\n\
-wait' > /app/start.sh && chmod +x /app/start.sh
+# Copy startup script
+COPY start_services.sh /app/start_services.sh
+RUN chmod +x /app/start_services.sh
 
-# Set entrypoint
-CMD ["/app/start.sh"]
+# Run the startup script
+CMD ["/app/start_services.sh"]

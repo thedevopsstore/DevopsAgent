@@ -3,13 +3,15 @@
 
 set -e
 
-# Create sessions directory if it doesn't exist
+# Create sessions and logs directories if they don't exist
 mkdir -p /app/sessions
+mkdir -p /app/logs
 
 # Start the backend server in the background
 echo "🚀 Starting DevOps Supervisor Agent backend server..."
 echo "   Backend will run on: ${A2A_HOST:-0.0.0.0}:${A2A_PORT:-9000}"
-uv run python supervisor_with_aws_agent.py > /app/logs/backend.log 2>&1 &
+# Use unbuffered output for immediate logs
+uv run python -u main.py > /app/logs/backend.log 2>&1 &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start
@@ -56,7 +58,7 @@ echo "   Frontend will run on: ${STREAMLIT_SERVER_ADDRESS:-0.0.0.0}:${STREAMLIT_
 echo "   Backend URL: http://localhost:${A2A_PORT:-9000}"
 echo ""
 
-uv run streamlit run streamlit_agent_ui.py \
+uv run streamlit run ui/app.py \
     --server.port=${STREAMLIT_SERVER_PORT:-8501} \
     --server.address=${STREAMLIT_SERVER_ADDRESS:-0.0.0.0} \
     --server.headless=true \

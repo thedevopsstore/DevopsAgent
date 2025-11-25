@@ -7,43 +7,36 @@ logger = logging.getLogger(__name__)
 # Global task reference
 email_polling_task = None
 
+import time
+import os
+from pathlib import Path
+
 async def email_polling_loop(multi_session_manager):
     """
     Background task that periodically prompts the supervisor to check for new emails.
     
-    Uses dedicated autonomous session (AUTONOMOUS_SESSION_ID) so email processing history
-    is isolated from user sessions.
-    
-    The supervisor agent will autonomously:
-    - Use list-mail-messages to check for new/unread emails
-    - Read email content using get-mail-message
-    - Analyze and delegate to worker agents
-    - Send response emails using send-mail
-    
-    This is a clean, agentic approach where the supervisor handles everything.
+    Uses ephemeral autonomous sessions so each poll is fresh with no history.
     """
     logger.info(f"📧 Starting email polling loop (interval: {settings.EMAIL_POLL_INTERVAL}s)")
-    logger.info(f"   Using autonomous session: {settings.AUTONOMOUS_SESSION_ID}")
-    
-    # Get the autonomous session agent
-    autonomous_agent = multi_session_manager.get_or_create_agent(settings.AUTONOMOUS_SESSION_ID)
     
     while True:
+        session_id = f"{settings.AUTONOMOUS_SESSION_ID}-{int(time.time())}"
+        session_file = Path(__file__).parent.parent / "sessions" / f"{session_id}.json"
+        
         try:
             await asyncio.sleep(settings.EMAIL_POLL_INTERVAL)
             
-            logger.debug("Triggering supervisor to check for new emails...")
+            logger.debug(f"Triggering supervisor to check for new emails (Session: {session_id})...")
             
-            # Simple prompt - supervisor uses its MCP tools to handle everything
-            # Uses dedicated autonomous session, so conversation history is isolated
+            # Get a fresh agent for this poll
+            autonomous_agent = multi_session_manager.get_or_create_agent(session_id)
+            
             email_check_prompt = (
                 "Check for new emails or unread emails in the inbox. "
-                "If there are any new emails, read them, analyze what action is needed, "
-                "delegate to the appropriate worker agent, and send response emails with the results."
+                "If there are any new emails in the inbox, read them, analyze what action is needed, "
+                "and send response emails with the results."
             )
             
-            # Let supervisor handle everything (agentic)
-            # This uses the autonomous session, isolated from user sessions
             try:
                 response = autonomous_agent(email_check_prompt)
                 logger.debug(f"Email check completed. Response: {str(response)[:200]}...")
@@ -55,8 +48,22 @@ async def email_polling_loop(multi_session_manager):
             break
         except Exception as e:
             logger.error(f"Error in email polling loop: {e}", exc_info=True)
-            # Continue polling even if there's an error
             await asyncio.sleep(settings.EMAIL_POLL_INTERVAL)
+        finally:
+            # Cleanup: Remove the temporary session file
+            if session_file.exists():
+                try:
+                    os.remove(session_file)
+                    logger.debug(f"Cleaned up session file: {session_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup session file {session_file}: {e}")
+            
+            # Remove from memory if possible (optional, as MultiSessionManager keeps it)
+            # Ideally MultiSessionManager should have a remove_agent method, but for now file cleanup is most important
+            if session_id in multi_session_manager.agents:
+                del multi_session_manager.agents[session_id]
+            if session_id in multi_session_manager.session_managers:
+                del multi_session_manager.session_managers[session_id]
 
 async def start_email_polling(multi_session_manager):
     """Start the background email polling task (optional - can be disabled)"""
