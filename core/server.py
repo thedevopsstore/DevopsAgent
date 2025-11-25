@@ -121,15 +121,21 @@ class SessionAwareAgent:
             if match:
                 session_id = match.group(1)
                 cleaned_message = self.CLEAN_PATTERN.sub('', message)
-                agent = self.session_manager.get_or_create_agent(session_id)
-                return agent(cleaned_message, **kwargs)
-            else:
-                agent = self.session_manager.get_or_create_agent(self.default_session_id)
-                return agent(message, **kwargs)
-        else:
-            session_id = self._extract_session_id(message)
             agent = self.session_manager.get_or_create_agent(session_id)
-            return agent(message, **kwargs)
+            response = agent(cleaned_message, **kwargs)
+            logger.info(f"🤖 Supervisor Response (Session: {session_id}):\n{response}")
+            return response
+        else:
+            agent = self.session_manager.get_or_create_agent(self.default_session_id)
+            response = agent(message, **kwargs)
+            logger.info(f"🤖 Supervisor Response (Session: {self.default_session_id}):\n{response}")
+            return response
+    else:
+        session_id = self._extract_session_id(message)
+        agent = self.session_manager.get_or_create_agent(session_id)
+        response = agent(message, **kwargs)
+        logger.info(f"🤖 Supervisor Response (Session: {session_id}):\n{response}")
+        return response
     
     @property
     def name(self):

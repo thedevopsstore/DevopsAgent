@@ -13,6 +13,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Enable debug logging for strands to see agent thought process
+logging.getLogger("strands").setLevel(logging.DEBUG)
+
 async def main():
     """Main entry point"""
     print("🚀 Starting DevOps Agent...")
