@@ -10,8 +10,8 @@ mkdir -p /app/logs
 # Start the backend server in the background
 echo "🚀 Starting DevOps Supervisor Agent backend server..."
 echo "   Backend will run on: ${A2A_HOST:-0.0.0.0}:${A2A_PORT:-9000}"
-# Use unbuffered output for immediate logs
-uv run python -u main.py > /app/logs/backend.log 2>&1 &
+# Use unbuffered output for immediate logs, pipe to both stdout and file
+uv run python -u main.py 2>&1 | tee /app/logs/backend.log &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start
