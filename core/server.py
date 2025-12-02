@@ -64,6 +64,11 @@ class SessionAwareAgent:
     def _extract_session_id(self, message) -> str:
         """Extract session_id from message or use default"""
         logger.debug(f"🔍 Extracting session ID from message type: {type(message)}")
+        logger.debug(f"🔍 Message repr: {repr(message)}")
+        try:
+            logger.debug(f"🔍 Message dir: {dir(message)}")
+        except:
+            pass
         
         # Safely try to extract from message context_id or taskId
         try:
