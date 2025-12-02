@@ -65,6 +65,8 @@ class SessionAwareAgent:
     
     def _extract_session_id(self, message) -> str:
         """Extract session_id from message or use default"""
+        # logger.debug(f"🔍 Extracting session ID from message type: {type(message)}")
+        
         # Safely try to extract from message context_id or taskId
         try:
             if hasattr(message, 'contextId') and message.contextId:
@@ -88,6 +90,7 @@ class SessionAwareAgent:
                     text = part.get('text', '')
                 
                 if text:
+                    # logger.debug(f"Checking text for session ID: {text[:50]}...")
                     match = self.SESSION_ID_PATTERN.search(text)
                     if match:
                         session_id = match.group(1)
@@ -97,6 +100,7 @@ class SessionAwareAgent:
                             part.text = cleaned_text
                         elif isinstance(part, dict):
                             part['text'] = cleaned_text
+                        logger.info(f"✅ Extracted session ID: {session_id}")
                         return session_id
         
         # Try to extract from dict format
@@ -111,8 +115,10 @@ class SessionAwareAgent:
                         if match:
                             session_id = match.group(1)
                             part['text'] = self.CLEAN_PATTERN.sub('', text)
+                            logger.info(f"✅ Extracted session ID: {session_id}")
                             return session_id
         
+        logger.info(f"⚠️ No session ID found, using default: {self.default_session_id}")
         return self.default_session_id
     
     def __call__(self, message, **kwargs):
