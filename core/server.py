@@ -28,13 +28,12 @@ class MultiSessionManager:
         """Get or create an agent for a given session ID"""
         with self._lock:
             if session_id not in self.agents:
-                # Create session file path
-                session_file = SESSION_DIR / f"{session_id}.json"
-                
+            if session_id not in self.agents:
                 # Create FileSessionManager for this session (persistence)
+                # Note: FileSessionManager takes storage_dir, not session_file
                 session_manager = FileSessionManager(
                     session_id=session_id,
-                    session_file=str(session_file)
+                    storage_dir=str(SESSION_DIR)
                 )
                 self.session_managers[session_id] = session_manager
                 
@@ -48,7 +47,7 @@ class MultiSessionManager:
                 agent = self.agent_factory(session_manager, conversation_manager)
                 self.agents[session_id] = agent
                 
-                logger.info(f"📁 Created new session: {session_id}")
+                logger.info(f"📁 Created new session: {session_id} in {SESSION_DIR}")
             
             return self.agents[session_id]
 
@@ -65,7 +64,7 @@ class SessionAwareAgent:
     
     def _extract_session_id(self, message) -> str:
         """Extract session_id from message or use default"""
-        # logger.debug(f"🔍 Extracting session ID from message type: {type(message)}")
+        logger.debug(f"🔍 Extracting session ID from message type: {type(message)}")
         
         # Safely try to extract from message context_id or taskId
         try:
@@ -90,7 +89,7 @@ class SessionAwareAgent:
                     text = part.get('text', '')
                 
                 if text:
-                    # logger.debug(f"Checking text for session ID: {text[:50]}...")
+                    logger.debug(f"Checking text for session ID: {text[:100]}...")
                     match = self.SESSION_ID_PATTERN.search(text)
                     if match:
                         session_id = match.group(1)
