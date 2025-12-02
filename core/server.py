@@ -6,7 +6,7 @@ from pathlib import Path
 from strands import Agent
 from strands.multiagent.a2a import A2AServer
 from strands.session.file_session_manager import FileSessionManager
-from strands.conversation import SummarizingConversationManager
+from strands.agent.conversation_manager import SummarizingConversationManager
 from core.config import settings
 
 logger = logging.getLogger(__name__)
