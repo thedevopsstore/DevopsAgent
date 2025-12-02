@@ -28,7 +28,6 @@ class MultiSessionManager:
         """Get or create an agent for a given session ID"""
         with self._lock:
             if session_id not in self.agents:
-            if session_id not in self.agents:
                 # Create FileSessionManager for this session (persistence)
                 # Note: FileSessionManager takes storage_dir, not session_file
                 session_manager = FileSessionManager(
