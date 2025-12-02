@@ -82,8 +82,13 @@ class SessionAwareAgent:
         if hasattr(message, 'parts'):
             for part in message.parts:
                 text = None
+                # Check for direct text attribute
                 if hasattr(part, 'text'):
                     text = part.text
+                # Check for root.text (Pydantic RootModel)
+                elif hasattr(part, 'root') and hasattr(part.root, 'text'):
+                    text = part.root.text
+                # Check for dict
                 elif isinstance(part, dict):
                     text = part.get('text', '')
                 
@@ -96,6 +101,8 @@ class SessionAwareAgent:
                         cleaned_text = self.CLEAN_PATTERN.sub('', text)
                         if hasattr(part, 'text'):
                             part.text = cleaned_text
+                        elif hasattr(part, 'root') and hasattr(part.root, 'text'):
+                            part.root.text = cleaned_text
                         elif isinstance(part, dict):
                             part['text'] = cleaned_text
                         logger.info(f"✅ Extracted session ID: {session_id}")
