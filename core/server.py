@@ -46,7 +46,7 @@ class MultiSessionManager:
                 agent = self.agent_factory(session_manager, conversation_manager)
                 self.agents[session_id] = agent
                 
-                logger.info(f"📁 Created new session: {session_id} in {SESSION_DIR}")
+                logger.info(f"📁 Created new session: {session_id} in {SESSION_DIR} (Total: {len(self.agents)} sessions)")
             
             return self.agents[session_id]
     
@@ -73,87 +73,98 @@ class SessionAwareAgent:
     
     def _extract_session_id(self, message, **kwargs) -> str:
         """Extract session_id from message or use default"""
-        logger.debug(f"🔍 Extracting session ID from message type: {type(message)}")
-        
         # Check if contextId is in kwargs (might be passed from A2A request context)
         if kwargs:
             context_id = kwargs.get('contextId') or kwargs.get('context_id')
             if context_id:
-                logger.info(f"✅ Extracted session ID from kwargs: {context_id}")
+                logger.debug(f"Extracted session ID from kwargs: {context_id}")
                 return str(context_id)
         
-        # FIRST: Check dict format (faster, check this before attribute access)
+        # FIRST: Check if message is a list (common in A2A protocol)
+        if isinstance(message, list):
+            for item in message:
+                if isinstance(item, dict):
+                    # Check for text in dict
+                    text = item.get('text', '')
+                    if text:
+                        match = self.SESSION_ID_PATTERN.search(str(text))
+                        if match:
+                            session_id = match.group(1)
+                            # Clean the text
+                            cleaned_text = self.CLEAN_PATTERN.sub('', str(text))
+                            item['text'] = cleaned_text
+                            logger.debug(f"Extracted session ID from list item text: {session_id}")
+                            return session_id
+                elif hasattr(item, 'text'):
+                    # Check for text attribute
+                    try:
+                        text = getattr(item, 'text', None)
+                        if text:
+                            match = self.SESSION_ID_PATTERN.search(str(text))
+                            if match:
+                                session_id = match.group(1)
+                                # Clean the text
+                                cleaned_text = self.CLEAN_PATTERN.sub('', str(text))
+                                item.text = cleaned_text
+                                logger.debug(f"Extracted session ID from list item text attribute: {session_id}")
+                                return session_id
+                    except:
+                        pass
+        
+        # SECOND: Check dict format
         if isinstance(message, dict):
             # Check for contextId at top level
             if 'contextId' in message:
                 session_id = message['contextId']
-                logger.info(f"✅ Extracted session ID from dict.contextId: {session_id}")
+                logger.debug(f"Extracted session ID from dict.contextId: {session_id}")
                 return str(session_id)
             if 'context_id' in message:
                 session_id = message['context_id']
-                logger.info(f"✅ Extracted session ID from dict.context_id: {session_id}")
+                logger.debug(f"Extracted session ID from dict.context_id: {session_id}")
                 return str(session_id)
             # Check for session_id at top level
             if 'session_id' in message:
                 session_id = message['session_id']
-                logger.info(f"✅ Extracted session ID from dict.session_id: {session_id}")
+                logger.debug(f"Extracted session ID from dict.session_id: {session_id}")
                 return str(session_id)
-            # Check for taskId (sometimes used as session identifier)
-            if 'taskId' in message:
-                session_id = message['taskId']
-                logger.debug(f"Found taskId in dict: {session_id}")
-                # Could use taskId, but prefer other methods first
             # Check parts in dict format
             if 'parts' in message:
                 for part in message['parts']:
                     if isinstance(part, dict):
                         text = part.get('text', '')
                         if text:
-                            logger.debug(f"Checking dict part text for session ID: {text[:100]}...")
                             match = self.SESSION_ID_PATTERN.search(text)
                             if match:
                                 session_id = match.group(1)
                                 part['text'] = self.CLEAN_PATTERN.sub('', text)
-                                logger.info(f"✅ Extracted session ID from dict part text: {session_id}")
+                                logger.debug(f"Extracted session ID from dict part text: {session_id}")
                                 return session_id
         
-        # SECOND: Safely try to extract from message attributes (object format)
+        # THIRD: Try to extract from message attributes (object format)
         try:
             if hasattr(message, 'contextId'):
                 context_id = getattr(message, 'contextId', None)
                 if context_id:
-                    logger.info(f"✅ Extracted session ID from message.contextId: {context_id}")
+                    logger.debug(f"Extracted session ID from message.contextId: {context_id}")
                     return str(context_id)
-        except (AttributeError, TypeError) as e:
-            logger.debug(f"Error accessing message.contextId: {e}")
+        except (AttributeError, TypeError):
             pass
             
         try:
             if hasattr(message, 'context_id'):
                 context_id = getattr(message, 'context_id', None)
                 if context_id:
-                    logger.info(f"✅ Extracted session ID from message.context_id: {context_id}")
+                    logger.debug(f"Extracted session ID from message.context_id: {context_id}")
                     return str(context_id)
-        except (AttributeError, TypeError) as e:
-            logger.debug(f"Error accessing message.context_id: {e}")
-            pass
-            
-        try:
-            if hasattr(message, 'taskId'):
-                task_id = getattr(message, 'taskId', None)
-                if task_id:
-                    logger.debug(f"Found message.taskId: {task_id}")
-                    # Could use taskId, but prefer other methods first
-        except (AttributeError, TypeError) as e:
-            logger.debug(f"Error accessing message.taskId: {e}")
+        except (AttributeError, TypeError):
             pass
         
-        # THIRD: Try to extract from message parts (object format)
+        # FOURTH: Try to extract from message parts (object format)
         try:
             if hasattr(message, 'parts'):
                 parts = getattr(message, 'parts', None)
                 if parts:
-                    for idx, part in enumerate(parts):
+                    for part in parts:
                         text = None
                         # Check for direct text attribute
                         if hasattr(part, 'text'):
@@ -174,7 +185,6 @@ class SessionAwareAgent:
                             text = part.get('text', '')
                         
                         if text:
-                            logger.debug(f"Checking part {idx} text for session ID: {text[:100]}...")
                             match = self.SESSION_ID_PATTERN.search(str(text))
                             if match:
                                 session_id = match.group(1)
@@ -187,53 +197,44 @@ class SessionAwareAgent:
                                         part.root.text = cleaned_text
                                     elif isinstance(part, dict):
                                         part['text'] = cleaned_text
-                                except Exception as e:
-                                    logger.debug(f"Could not clean text in part: {e}")
-                                logger.info(f"✅ Extracted session ID from part text: {session_id}")
+                                except Exception:
+                                    pass
+                                logger.debug(f"Extracted session ID from part text: {session_id}")
                                 return session_id
-        except (AttributeError, TypeError, IndexError) as e:
-            logger.debug(f"Error accessing message.parts: {e}")
+        except (AttributeError, TypeError, IndexError):
             pass
         
-        # FOURTH: Try to access message as string representation
+        # FIFTH: Try to access message as string representation
         try:
             message_str = str(message)
-            if message_str and message_str != repr(message):  # Only if it's not just object repr
-                logger.debug(f"Checking message string representation for session ID: {message_str[:200]}...")
+            if message_str and message_str != repr(message):
                 match = self.SESSION_ID_PATTERN.search(message_str)
                 if match:
                     session_id = match.group(1)
-                    logger.info(f"✅ Extracted session ID from string representation: {session_id}")
+                    logger.debug(f"Extracted session ID from string representation: {session_id}")
                     return session_id
-        except Exception as e:
-            logger.debug(f"Error converting message to string: {e}")
+        except Exception:
             pass
         
-        logger.warning(f"⚠️ No session ID found in message, using default: {self.default_session_id}")
-        logger.debug(f"   Message type: {type(message)}, Message: {repr(message)[:200]}")
+        logger.debug(f"No session ID found in message, using default: {self.default_session_id}")
         return self.default_session_id
     
     def __call__(self, message, **kwargs):
+        """Handle synchronous calls - route to session-specific agent"""
         if isinstance(message, str):
             match = self.SESSION_ID_PATTERN.search(message)
             if match:
                 session_id = match.group(1)
                 cleaned_message = self.CLEAN_PATTERN.sub('', message)
                 agent = self.session_manager.get_or_create_agent(session_id)
-                response = agent(cleaned_message, **kwargs)
-                logger.info(f"🤖 Supervisor Response (Session: {session_id}):\n{response}")
-                return response
+                return agent(cleaned_message, **kwargs)
             else:
                 agent = self.session_manager.get_or_create_agent(self.default_session_id)
-                response = agent(message, **kwargs)
-                logger.info(f"🤖 Supervisor Response (Session: {self.default_session_id}):\n{response}")
-                return response
+                return agent(message, **kwargs)
         else:
             session_id = self._extract_session_id(message, **kwargs)
             agent = self.session_manager.get_or_create_agent(session_id)
-            response = agent(message, **kwargs)
-            logger.info(f"🤖 Supervisor Response (Session: {session_id}):\n{response}")
-            return response
+            return agent(message, **kwargs)
     
     @property
     def name(self):
@@ -247,8 +248,27 @@ class SessionAwareAgent:
     def tools(self):
         return self.session_manager.get_or_create_agent(self.default_session_id).tools
 
+    async def stream_async(self, message, **kwargs):
+        """
+        Stream messages asynchronously - intercept this to route to correct session
+        This is the method A2A server uses for streaming responses
+        """
+        # Extract session ID from message (this will also clean it from message parts if found)
+        session_id = self._extract_session_id(message, **kwargs)
+        
+        # Get or create the session-specific agent
+        agent = self.session_manager.get_or_create_agent(session_id)
+        
+        # Call stream_async on the session-specific agent
+        # Note: message has already been cleaned by _extract_session_id if session_id was in text
+        async for item in agent.stream_async(message, **kwargs):
+            yield item
+
     def __getattr__(self, name):
-        """Delegate other attributes to default agent (for A2AServer compatibility)"""
+        """
+        Delegate other attributes to default agent (for A2AServer compatibility)
+        NOTE: stream_async is explicitly defined above to enable session routing
+        """
         default_agent = self.session_manager.get_or_create_agent(self.default_session_id)
         return getattr(default_agent, name)
 
@@ -274,9 +294,6 @@ class AgentServer:
             version=settings.A2A_VERSION
         )
         
-        print(f"\n🌐 A2A Server: http://{settings.A2A_HOST}:{settings.A2A_PORT}")
-        print(f"   Agent Card: http://{settings.A2A_HOST}:{settings.A2A_PORT}/.well-known/agent-card.json")
-        
         self.server_thread = threading.Thread(
             target=self._run_server,
             daemon=True,
@@ -293,6 +310,6 @@ class AgentServer:
             
     async def stop(self):
         if self.server:
-            print("🛑 Stopping A2A Server...")
+            logger.info("Stopping A2A Server...")
             self.server = None
             self.server_thread = None

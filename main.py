@@ -3,7 +3,7 @@ import logging
 import signal
 from core.config import settings
 from core.server import AgentServer
-from core.email_polling import start_email_polling, stop_email_polling
+#from core.email_polling import start_email_polling, stop_email_polling
 from agents.supervisor import create_supervisor_agent, initialize_subagents, cleanup_subagents
 
 # Configure logging
@@ -13,8 +13,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Enable debug logging for strands to see agent thought process
-logging.getLogger("strands").setLevel(logging.DEBUG)
+# Enable debug logging for strands to see agent thought process (optional)
+# logging.getLogger("strands").setLevel(logging.DEBUG)
 
 async def main():
     """Main entry point"""
@@ -30,15 +30,17 @@ async def main():
     await server.start()
     
     # Start email polling (if configured)
-    email_task = await start_email_polling(
-        multi_session_manager=server.session_manager
-    )
+    # email_task = await start_email_polling(
+    #     multi_session_manager=server.session_manager
+    # )
     
     print("\n" + "=" * 60)
     print("🎯 DevOps Supervisor Agent Server Running!")
     print("=" * 60)
     print(f"🌐 A2A Server: http://{settings.A2A_HOST}:{settings.A2A_PORT}")
     print(f"💡 UI Command: streamlit run ui/app.py")
+    print(f"📊 Active Sessions: {server.session_manager.get_session_count()}")
+    print(f"   Session IDs: {server.session_manager.list_session_ids()}")
     print("\n⚠️  Press Ctrl+C to shutdown gracefully\n")
     
     # Keep running until interrupted
@@ -59,7 +61,7 @@ async def main():
         logger.error(f"Error in main loop: {e}", exc_info=True)
     finally:
         print("\n🧹 Shutting down...")
-        await stop_email_polling()
+        #await stop_email_polling()
         await server.stop()
         await cleanup_subagents()
         print("✅ Shutdown complete!")
