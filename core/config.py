@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     A2A_PORT: int = 9000
     A2A_VERSION: str = "1.0.0"
     
+    # AWS Agent A2A Server Configuration
+    AWS_A2A_PORT: int = 9001
+    
     # AWS Configuration
     AWS_REGION: str = "us-east-1"
     AWS_API_MCP_SERVER_URL: Optional[str] = None
