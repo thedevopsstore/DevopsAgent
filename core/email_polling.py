@@ -76,13 +76,13 @@ async def start_email_polling(multi_session_manager):
     
     # If EMAIL_POLL_INTERVAL is 0 or negative, skip polling (use external triggers only)
     if settings.EMAIL_POLL_INTERVAL <= 0:
-        print("📧 Email polling disabled (EMAIL_POLL_INTERVAL <= 0). Use external triggers (A2A) to check emails.")
+        print("📧 Email polling disabled (EMAIL_POLL_INTERVAL <= 0). Use external triggers (REST API) to check emails.")
         return None
     
     email_polling_task = asyncio.create_task(email_polling_loop(multi_session_manager))
     print(f"📧 Email polling started (interval: {settings.EMAIL_POLL_INTERVAL}s)")
     print(f"   Using autonomous session: {settings.AUTONOMOUS_SESSION_ID}")
-    print("   You can also trigger email checks externally via A2A endpoint")
+    print("   You can also trigger email checks externally via REST API endpoint")
     return email_polling_task
 
 async def stop_email_polling():

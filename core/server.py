@@ -1,12 +1,17 @@
 import logging
-import threading
 import asyncio
-import re
+import json
+import threading
 from pathlib import Path
+from typing import Optional
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from strands import Agent
-from strands.multiagent.a2a import A2AServer
 from strands.session.file_session_manager import FileSessionManager
 from strands.agent.conversation_manager import SummarizingConversationManager
+import uvicorn
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -60,256 +65,129 @@ class MultiSessionManager:
         with self._lock:
             return list(self.agents.keys())
 
-class SessionAwareAgent:
-    """Wrapper agent that routes requests to session-specific agents"""
-    
-    # Pre-compile regex patterns
-    SESSION_ID_PATTERN = re.compile(r'session_id[:\s]+([a-zA-Z0-9_-]+)', re.IGNORECASE)
-    CLEAN_PATTERN = re.compile(r'session_id[:\s]+[a-zA-Z0-9_-]+\s*\n?\s*', re.IGNORECASE)
+# Pydantic models for API requests/responses
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
 
-    def __init__(self, session_manager: MultiSessionManager, default_session_id: str = "default"):
-        self.session_manager = session_manager
-        self.default_session_id = default_session_id
-    
-    def _extract_session_id(self, message, **kwargs) -> str:
-        """Extract session_id from message or use default"""
-        # Check if contextId is in kwargs (might be passed from A2A request context)
-        if kwargs:
-            context_id = kwargs.get('contextId') or kwargs.get('context_id')
-            if context_id:
-                logger.debug(f"Extracted session ID from kwargs: {context_id}")
-                return str(context_id)
-        
-        # FIRST: Check if message is a list (common in A2A protocol)
-        if isinstance(message, list):
-            for item in message:
-                if isinstance(item, dict):
-                    # Check for text in dict
-                    text = item.get('text', '')
-                    if text:
-                        match = self.SESSION_ID_PATTERN.search(str(text))
-                        if match:
-                            session_id = match.group(1)
-                            # Clean the text
-                            cleaned_text = self.CLEAN_PATTERN.sub('', str(text))
-                            item['text'] = cleaned_text
-                            logger.debug(f"Extracted session ID from list item text: {session_id}")
-                            return session_id
-                elif hasattr(item, 'text'):
-                    # Check for text attribute
-                    try:
-                        text = getattr(item, 'text', None)
-                        if text:
-                            match = self.SESSION_ID_PATTERN.search(str(text))
-                            if match:
-                                session_id = match.group(1)
-                                # Clean the text
-                                cleaned_text = self.CLEAN_PATTERN.sub('', str(text))
-                                item.text = cleaned_text
-                                logger.debug(f"Extracted session ID from list item text attribute: {session_id}")
-                                return session_id
-                    except:
-                        pass
-        
-        # SECOND: Check dict format
-        if isinstance(message, dict):
-            # Check for contextId at top level
-            if 'contextId' in message:
-                session_id = message['contextId']
-                logger.debug(f"Extracted session ID from dict.contextId: {session_id}")
-                return str(session_id)
-            if 'context_id' in message:
-                session_id = message['context_id']
-                logger.debug(f"Extracted session ID from dict.context_id: {session_id}")
-                return str(session_id)
-            # Check for session_id at top level
-            if 'session_id' in message:
-                session_id = message['session_id']
-                logger.debug(f"Extracted session ID from dict.session_id: {session_id}")
-                return str(session_id)
-            # Check parts in dict format
-            if 'parts' in message:
-                for part in message['parts']:
-                    if isinstance(part, dict):
-                        text = part.get('text', '')
-                        if text:
-                            match = self.SESSION_ID_PATTERN.search(text)
-                            if match:
-                                session_id = match.group(1)
-                                part['text'] = self.CLEAN_PATTERN.sub('', text)
-                                logger.debug(f"Extracted session ID from dict part text: {session_id}")
-                                return session_id
-        
-        # THIRD: Try to extract from message attributes (object format)
-        try:
-            if hasattr(message, 'contextId'):
-                context_id = getattr(message, 'contextId', None)
-                if context_id:
-                    logger.debug(f"Extracted session ID from message.contextId: {context_id}")
-                    return str(context_id)
-        except (AttributeError, TypeError):
-            pass
-            
-        try:
-            if hasattr(message, 'context_id'):
-                context_id = getattr(message, 'context_id', None)
-                if context_id:
-                    logger.debug(f"Extracted session ID from message.context_id: {context_id}")
-                    return str(context_id)
-        except (AttributeError, TypeError):
-            pass
-        
-        # FOURTH: Try to extract from message parts (object format)
-        try:
-            if hasattr(message, 'parts'):
-                parts = getattr(message, 'parts', None)
-                if parts:
-                    for part in parts:
-                        text = None
-                        # Check for direct text attribute
-                        if hasattr(part, 'text'):
-                            try:
-                                text = getattr(part, 'text', None)
-                            except:
-                                pass
-                        # Check for root.text (Pydantic RootModel)
-                        if not text and hasattr(part, 'root'):
-                            try:
-                                root = getattr(part, 'root', None)
-                                if root and hasattr(root, 'text'):
-                                    text = getattr(root, 'text', None)
-                            except:
-                                pass
-                        # Check for dict
-                        if not text and isinstance(part, dict):
-                            text = part.get('text', '')
-                        
-                        if text:
-                            match = self.SESSION_ID_PATTERN.search(str(text))
-                            if match:
-                                session_id = match.group(1)
-                                # Clean text
-                                cleaned_text = self.CLEAN_PATTERN.sub('', str(text))
-                                try:
-                                    if hasattr(part, 'text'):
-                                        part.text = cleaned_text
-                                    elif hasattr(part, 'root') and hasattr(part.root, 'text'):
-                                        part.root.text = cleaned_text
-                                    elif isinstance(part, dict):
-                                        part['text'] = cleaned_text
-                                except Exception:
-                                    pass
-                                logger.debug(f"Extracted session ID from part text: {session_id}")
-                                return session_id
-        except (AttributeError, TypeError, IndexError):
-            pass
-        
-        # FIFTH: Try to access message as string representation
-        try:
-            message_str = str(message)
-            if message_str and message_str != repr(message):
-                match = self.SESSION_ID_PATTERN.search(message_str)
-                if match:
-                    session_id = match.group(1)
-                    logger.debug(f"Extracted session ID from string representation: {session_id}")
-                    return session_id
-        except Exception:
-            pass
-        
-        logger.debug(f"No session ID found in message, using default: {self.default_session_id}")
-        return self.default_session_id
-    
-    def __call__(self, message, **kwargs):
-        """Handle synchronous calls - route to session-specific agent"""
-        if isinstance(message, str):
-            match = self.SESSION_ID_PATTERN.search(message)
-            if match:
-                session_id = match.group(1)
-                cleaned_message = self.CLEAN_PATTERN.sub('', message)
-                agent = self.session_manager.get_or_create_agent(session_id)
-                return agent(cleaned_message, **kwargs)
-            else:
-                agent = self.session_manager.get_or_create_agent(self.default_session_id)
-                return agent(message, **kwargs)
-        else:
-            session_id = self._extract_session_id(message, **kwargs)
-            agent = self.session_manager.get_or_create_agent(session_id)
-            return agent(message, **kwargs)
-    
-    @property
-    def name(self):
-        return self.session_manager.get_or_create_agent(self.default_session_id).name
-
-    @property
-    def description(self):
-        return self.session_manager.get_or_create_agent(self.default_session_id).description
-
-    @property
-    def tools(self):
-        return self.session_manager.get_or_create_agent(self.default_session_id).tools
-
-    async def stream_async(self, message, **kwargs):
-        """
-        Stream messages asynchronously - intercept this to route to correct session
-        This is the method A2A server uses for streaming responses
-        """
-        # Extract session ID from message (this will also clean it from message parts if found)
-        session_id = self._extract_session_id(message, **kwargs)
-        
-        # Get or create the session-specific agent
-        agent = self.session_manager.get_or_create_agent(session_id)
-        
-        # Call stream_async on the session-specific agent
-        # Note: message has already been cleaned by _extract_session_id if session_id was in text
-        async for item in agent.stream_async(message, **kwargs):
-            yield item
-
-    def __getattr__(self, name):
-        """
-        Delegate other attributes to default agent (for A2AServer compatibility)
-        NOTE: stream_async is explicitly defined above to enable session routing
-        """
-        default_agent = self.session_manager.get_or_create_agent(self.default_session_id)
-        return getattr(default_agent, name)
+class ChatResponse(BaseModel):
+    response: str
+    session_id: str
 
 class AgentServer:
+    """FastAPI server for agent communication with session management"""
+    
     def __init__(self, agent_factory):
         self.session_manager = MultiSessionManager(agent_factory)
+        self.app = FastAPI(title="DevOps Agent API", version=settings.API_VERSION)
         self.server = None
-        self.server_thread = None
         
-    async def start(self):
-        session_aware_agent = SessionAwareAgent(
-            session_manager=self.session_manager,
-            default_session_id="default"
+        # Add CORS middleware for Streamlit UI
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # In production, specify allowed origins
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
         )
         
-        # Initialize the default agent immediately so A2AServer can inspect it
+        # Initialize the default agent
         self.session_manager.get_or_create_agent("default")
         
-        self.server = A2AServer(
-            agent=session_aware_agent,
-            host=settings.A2A_HOST,
-            port=settings.A2A_PORT,
-            version=settings.A2A_VERSION
-        )
+        # Setup routes
+        self._setup_routes()
+    
+    def _setup_routes(self):
+        """Setup FastAPI routes"""
         
-        self.server_thread = threading.Thread(
-            target=self._run_server,
-            daemon=True,
-            name="a2a-server"
-        )
-        self.server_thread.start()
-        await asyncio.sleep(1)
+        @self.app.post("/api/chat", response_model=ChatResponse)
+        async def chat(request: ChatRequest):
+            """Send a message to the agent and get a response (non-streaming)"""
+            try:
+                agent = self.session_manager.get_or_create_agent(request.session_id)
+                response = agent(request.message)
+                return ChatResponse(
+                    response=str(response),
+                    session_id=request.session_id
+                )
+            except Exception as e:
+                logger.error(f"Error in chat endpoint: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
         
-    def _run_server(self):
-        try:
-            self.server.serve()
-        except Exception as e:
-            logger.error(f"A2A server error: {e}", exc_info=True)
+        @self.app.post("/api/chat/stream")
+        async def chat_stream(request: ChatRequest):
+            """Send a message to the agent and stream the response"""
+            async def event_stream():
+                try:
+                    agent = self.session_manager.get_or_create_agent(request.session_id)
+                    async for chunk in agent.stream_async(request.message):
+                        # Format as Server-Sent Events
+                        chunk_data = {
+                            "text": str(chunk),
+                            "session_id": request.session_id
+                        }
+                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                    # Send done event
+                    yield f"data: {json.dumps({'done': True, 'session_id': request.session_id})}\n\n"
+                except Exception as e:
+                    logger.error(f"Error in stream: {e}", exc_info=True)
+                    error_data = {
+                        "error": str(e),
+                        "session_id": request.session_id
+                    }
+                    yield f"data: {json.dumps(error_data)}\n\n"
             
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"  # Disable buffering for nginx
+                }
+            )
+        
+        @self.app.get("/api/health")
+        async def health():
+            """Health check endpoint"""
+            return {
+                "status": "healthy",
+                "sessions": self.session_manager.get_session_count(),
+                "session_ids": self.session_manager.list_session_ids()
+            }
+        
+        @self.app.get("/")
+        async def root():
+            """Root endpoint"""
+            return {
+                "name": "DevOps Agent API",
+                "version": settings.API_VERSION,
+                "endpoints": {
+                    "chat": "/api/chat",
+                    "chat_stream": "/api/chat/stream",
+                    "health": "/api/health"
+                }
+            }
+    
+    async def start(self):
+        """Start the FastAPI server using uvicorn"""
+        config = uvicorn.Config(
+            self.app,
+            host=settings.API_HOST,
+            port=settings.API_PORT,
+            log_level="info"
+        )
+        self.server = uvicorn.Server(config)
+        
+        logger.info(f"🚀 Starting FastAPI server on http://{settings.API_HOST}:{settings.API_PORT}")
+        logger.info(f"   POST /api/chat - Non-streaming chat")
+        logger.info(f"   POST /api/chat/stream - Streaming chat (SSE)")
+        logger.info(f"   GET  /api/health - Health check")
+        
+        await self.server.serve()
+    
     async def stop(self):
+        """Stop the server"""
         if self.server:
-            logger.info("Stopping A2A Server...")
-            self.server = None
-            self.server_thread = None
+            logger.info("Stopping FastAPI server...")
+            self.server.should_exit = True

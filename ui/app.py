@@ -1,6 +1,6 @@
 """
 Streamlit UI for DevOps Supervisor Agent
-Uses A2A protocol to communicate with backend server
+Uses REST API to communicate with backend server
 """
 
 import streamlit as st
@@ -9,10 +9,7 @@ import json
 from datetime import datetime
 from typing import Optional
 import uuid
-from uuid import uuid4
 import httpx
-from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
-from a2a.types import Message, Part, Role, TextPart
 import logging
 
 # Configure logging
@@ -29,25 +26,9 @@ def get_user_session_id() -> str:
         st.session_state.user_session_id = str(uuid.uuid4())
     return st.session_state.user_session_id
 
-def create_message(*, role: Role = Role.user, text: str) -> Message:
-    """Create an A2A protocol message"""
-    return Message(
-        kind="message",
-        role=role,
-        parts=[Part(TextPart(kind="text", text=text))],
-        message_id=uuid4().hex,
-    )
-
-@st.cache_resource(ttl=3600)
-async def get_cached_agent_card(backend_url: str):
-    """Cache the agent card to avoid repeated network calls"""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resolver = A2ACardResolver(httpx_client=client, base_url=backend_url)
-        return await resolver.get_agent_card()
-
-async def send_a2a_message(message: str, backend_url: str, session_id: str = None) -> Optional[str]:
+async def send_chat_message(message: str, backend_url: str, session_id: str = None) -> Optional[str]:
     """
-    Send a message to the backend A2A server using the a2a client
+    Send a message to the backend REST API
     
     Args:
         message: User message to send
@@ -62,80 +43,37 @@ async def send_a2a_message(message: str, backend_url: str, session_id: str = Non
         if session_id is None:
             session_id = get_user_session_id()
         
-        # Include session_id in the message text
-        message_with_session = f"session_id:{session_id}\n\n{message}"
-        
-        # Get cached agent card
-        # Note: We need a new loop for the cached function if called from sync wrapper
-        try:
-            agent_card = await get_cached_agent_card(backend_url)
-        except Exception:
-            # Fallback if cache fails or loop issues
-            async with httpx.AsyncClient(timeout=10) as client:
-                resolver = A2ACardResolver(httpx_client=client, base_url=backend_url)
-                agent_card = await resolver.get_agent_card()
-
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as httpx_client:
-            # Create client using factory
-            config = ClientConfig(
-                httpx_client=httpx_client,
-                streaming=False,  # Use non-streaming mode for sync response
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            response = await client.post(
+                f"{backend_url}/api/chat",
+                json={
+                    "message": message,
+                    "session_id": session_id
+                },
+                headers={"Content-Type": "application/json"}
             )
-            factory = ClientFactory(config)
-            client = factory.create(agent_card)
-            
-            # Create and send message
-            msg = create_message(text=message_with_session)
-            
-            # With streaming=False, this will yield exactly one result
-            async for event in client.send_message(msg):
-                if isinstance(event, Message):
-                    # Extract text from message parts
-                    text_parts = []
-                    for part in event.parts:
-                        if hasattr(part, 'text'):
-                            text_parts.append(part.text)
-                        elif isinstance(part, dict) and 'text' in part:
-                            text_parts.append(part['text'])
-                    return '\n'.join(text_parts) if text_parts else str(event)
-                elif isinstance(event, tuple) and len(event) == 2:
-                    # (Task, UpdateEvent) tuple - new A2A response format
-                    task, update_event = event
-                    
-                    # Extract text from task artifacts
-                    if hasattr(task, 'artifacts') and task.artifacts:
-                        text_parts = []
-                        for artifact in task.artifacts:
-                            if hasattr(artifact, 'parts'):
-                                for part in artifact.parts:
-                                    # Handle Part objects with nested TextPart
-                                    if hasattr(part, 'root') and hasattr(part.root, 'text'):
-                                        text_parts.append(part.root.text)
-                                    elif hasattr(part, 'text'):
-                                        text_parts.append(part.text)
-                        if text_parts:
-                            return '\n'.join(text_parts)
-                    
-                    # Fallback to string representation
-                    return str(task)
-                else:
-                    return str(event)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "")
                     
     except httpx.ConnectError:
         return "Error: Could not connect to backend server. Make sure the server is running."
     except httpx.TimeoutException:
         return "Error: Request timed out. The agent may be processing a long-running task."
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
+        return f"Error: HTTP {e.response.status_code} - {e.response.text}"
     except Exception as e:
-        logger.error(f"Error sending A2A message: {e}", exc_info=True)
+        logger.error(f"Error sending message: {e}", exc_info=True)
         return f"Error: {str(e)}"
 
 def send_message_to_backend(message: str, backend_url: str, session_id: str = None) -> Optional[str]:
     """
-    Synchronous wrapper around async A2A client
+    Synchronous wrapper around async REST API client
     """
     try:
         # Run the async function in an event loop
-        return asyncio.run(send_a2a_message(message, backend_url, session_id))
+        return asyncio.run(send_chat_message(message, backend_url, session_id))
     except Exception as e:
         logger.error(f"Error in sync wrapper: {e}", exc_info=True)
         return f"Error: {str(e)}"
@@ -148,8 +86,8 @@ async def check_backend_health_async(backend_url: str) -> bool:
     """Check if backend server is accessible"""
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            resolver = A2ACardResolver(httpx_client=client, base_url=backend_url)
-            await resolver.get_agent_card()
+            response = await client.get(f"{backend_url}/api/health")
+            response.raise_for_status()
             return True
     except:
         return False
@@ -182,7 +120,7 @@ def display_agent_info():
     backend_healthy = check_backend_health(backend_url)
     
     if backend_healthy:
-        st.success("✅ **Connected to backend server (A2A Protocol)**")
+        st.success("✅ **Connected to backend server (REST API)**")
         st.info("🤖 **Supervisor Agent** - Coordinates multiple specialized agents for infrastructure monitoring and management")
     else:
         st.error("❌ **Backend server not accessible**")
@@ -288,7 +226,7 @@ def display_sidebar():
         # Check connection
         if st.button("🔍 Check Connection"):
             if check_backend_health(backend_url):
-                st.success("✅ Connected (A2A)")
+                st.success("✅ Connected (REST API)")
             else:
                 st.error("❌ Not connected")
         
@@ -329,7 +267,7 @@ def display_sidebar():
         st.code("python main.py", language="bash")
         st.write("2. The server will run on port 9000 by default")
         st.write("3. Chat with the agent using the interface below")
-        st.write("4. Uses **A2A Protocol** for agent communication")
+        st.write("4. Uses **REST API** for agent communication")
 
 def main():
     """Main Streamlit application"""
@@ -341,7 +279,7 @@ def main():
     )
     
     st.markdown("# <span style='color: #1E88E5;'>⚙️ DevOps Supervisor Agent</span>", unsafe_allow_html=True)
-    st.markdown("Infrastructure monitoring and management with intelligent agent coordination (A2A Protocol)")
+    st.markdown("Infrastructure monitoring and management with intelligent agent coordination (REST API)")
     
     # Initialize session state
     initialize_session_state()

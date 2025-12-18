@@ -5,7 +5,7 @@ description = "DevOps Supervisor Agent with A2A Protocol"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "strands-agents[a2a]>=1.18.0",
+    "strands-agents[a2a]>=1.18.0",  # A2A support needed for AWS agent A2A server
     "strands-agents-tools",
     "streamlit",
     "boto3",
@@ -13,7 +13,9 @@ dependencies = [
     "mcp",
     "httpx",
     "pydantic-settings",
-    "a2a-sdk",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "a2a-sdk",  # A2A client SDK needed for supervisor to communicate with AWS agent
 ]
 
 [tool.uv]
