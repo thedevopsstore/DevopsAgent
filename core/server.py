@@ -2,11 +2,13 @@ import logging
 import threading
 import asyncio
 import re
+import uvicorn
 from pathlib import Path
 from strands import Agent
 from strands.multiagent.a2a import A2AServer
 from strands.session.file_session_manager import FileSessionManager
 from strands.agent.conversation_manager import SummarizingConversationManager
+from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -294,6 +296,27 @@ class AgentServer:
             version=settings.A2A_VERSION
         )
         
+        # Add CORS support for CopilotKit frontend
+        try:
+            app = self.server.to_fastapi_app()
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=[
+                    "http://localhost:3000",  # Next.js dev server
+                    "http://localhost:5173",  # Vite dev server
+                    "http://127.0.0.1:3000",
+                    "http://127.0.0.1:5173",
+                ],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            self.fastapi_app = app
+            logger.info("✅ CORS middleware added to A2A server")
+        except Exception as e:
+            logger.warning(f"Could not add CORS middleware: {e}")
+            self.fastapi_app = None
+        
         self.server_thread = threading.Thread(
             target=self._run_server,
             daemon=True,
@@ -301,10 +324,20 @@ class AgentServer:
         )
         self.server_thread.start()
         await asyncio.sleep(1)
-        
+    
     def _run_server(self):
         try:
-            self.server.serve()
+            # If we customized the FastAPI app with CORS, use uvicorn directly
+            if hasattr(self, 'fastapi_app') and self.fastapi_app:
+                uvicorn.run(
+                    self.fastapi_app,
+                    host=settings.A2A_HOST,
+                    port=settings.A2A_PORT,
+                    log_level="info"
+                )
+            else:
+                # Fallback to default serve() method
+                self.server.serve()
         except Exception as e:
             logger.error(f"A2A server error: {e}", exc_info=True)
             

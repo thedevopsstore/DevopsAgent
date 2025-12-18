@@ -127,7 +127,7 @@ async def initialize_subagents():
             try:
                 await asyncio.sleep(retry_delay)
                 await aws_a2a_tool.initialize()
-                logger.info("AWS CloudWatch Agent A2A server and client initialized!")
+                logger.info("✅ AWS CloudWatch Agent A2A server and client initialized!")
                 break
             except Exception as e:
                 if attempt < max_retries - 1:

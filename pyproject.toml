@@ -14,6 +14,9 @@ dependencies = [
     "httpx",
     "pydantic-settings",
     "a2a-sdk",
+    "fastapi",
+    "uvicorn[standard]",
+    "ag-ui-strands>=0.1.0",
 ]
 
 [tool.uv]

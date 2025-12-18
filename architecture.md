@@ -3,20 +3,24 @@
 ## 1. System Overview
 The **DevOps Supervisor Agent** is an intelligent, multi-agent system designed to assist with infrastructure monitoring and management. It uses a **Supervisor-Worker** pattern where a central Supervisor agent coordinates specialized sub-agents (AWS CloudWatch, Email) to fulfill user requests.
 
-The system is built on the **Strands** framework and uses the **Agent-to-Agent (A2A)** protocol for standardized communication between the frontend UI and the backend agent server. It supports both interactive chat sessions and autonomous background operations (email polling).
+The system is built on the **Strands** framework and uses **CopilotKit** with **ag-ui-strands** for native integration between the frontend UI and the backend agent server. The supervisor agent communicates directly with sub-agents (no A2A protocol between agents). It supports both interactive chat sessions and autonomous background operations (email polling).
 
 ## 2. High-Level Architecture
 
 ```mermaid
 graph TD
-    User[User] <--> UI[Streamlit UI]
-    UI <-->|"A2A Protocol (JSON-RPC)"| Server[A2A Server]
+    User[User] <--> UI[CopilotKit UI]
+    UI <-->|"AG-UI Protocol via HttpAgent"| Server[CopilotKit Server]
+    
+    User2[User] -.->|"Legacy"| Streamlit[Streamlit UI]
+    Streamlit -.->|"A2A Protocol"| Server2[A2A Server - Legacy]
     
     subgraph "Backend (Python/Strands)"
-        Server --> Supervisor[Supervisor Agent]
+        Server -->|"ag-ui-strands"| Supervisor[Supervisor Agent]
         
-        Supervisor -->|Delegates| AWS[AWS CloudWatch Agent]
-        Supervisor -->|Delegates| Email[Email MCP Client]
+        Supervisor -->|"A2A Protocol"| AWS_A2A[AWS A2A Server]
+        AWS_A2A --> AWS[AWS CloudWatch Agent]
+        Supervisor -->|"Direct Call"| Email[Email MCP Client]
         
         AWS -->|Boto3| CloudWatch[AWS CloudWatch API]
         AWS -->|Boto3| Logs[AWS CloudWatch Logs]
@@ -34,35 +38,39 @@ graph TD
 
 ## 3. Core Components
 
-### 3.1. Frontend (Streamlit UI)
-- **Path**: `ui/app.py`
-- **Role**: User interface for chatting with the agent.
-- **Key Features**:
-    - **A2A Client**: Uses `a2a-sdk` to communicate with the backend.
-    - **Caching**: Caches the Agent Card using `@st.cache_resource` to minimize network overhead.
-    - **Session Management**: Generates a unique UUID `user_session_id` for each browser tab/user.
-    - **Theming**: Custom DevOps-themed UI (Blue Gear icon).
+### 3.1. Frontend
+- **Streamlit UI** (`ui/app.py`): Legacy Streamlit interface (can be used alongside CopilotKit)
+- **CopilotKit UI** (`ui/copilotkit/`): Modern React/Next.js frontend using CopilotKit
+    - **Path**: `ui/copilotkit/`
+    - **Role**: User interface for chatting with the agent via CopilotKit components
+    - **Key Features**:
+        - **CopilotKit Runtime**: Uses `CopilotRuntime` with `HttpAgent` to connect to backend
+        - **AG-UI Protocol**: Communicates with backend server via AG-UI protocol (port 9000)
+        - **CopilotKit Components**: Uses `CopilotSidebar` for chat interface
+        - **Native Integration**: Direct connection to Strands agents via CopilotKit
 
 ### 3.2. Backend Server
-- **Path**: `core/server.py`
-- **Role**: Hosts the agents and exposes them via the A2A protocol.
+- **Path**: `core/copilotkit_server.py` (new), `core/server.py` (legacy A2A)
+- **Role**: Hosts the agents and exposes them via CopilotKit/AG-UI protocol.
 - **Key Features**:
-    - **A2AServer**: Uses `strands.multiagent.a2a.A2AServer` to provide JSON-RPC endpoints.
-    - **SessionAwareAgent**: A wrapper that routes incoming requests to the correct agent instance based on `session_id`.
-    - **MultiSessionManager**: Manages the lifecycle of agent instances per session.
-    - **SummarizingConversationManager**: Automatically summarizes conversation history to manage context window efficiency (keep last 10 messages, summarize 40%).
+    - **CopilotKit Server**: Uses `ag-ui-strands` to create FastAPI app that exposes Strands agents
+    - **MultiSessionManager**: Manages the lifecycle of agent instances per session
+    - **SummarizingConversationManager**: Automatically summarizes conversation history to manage context window efficiency (keep last 10 messages, summarize 40%)
+    - **AG-UI Protocol**: Exposes agents via AG-UI protocol for CopilotKit's HttpAgent to connect
 
 ### 3.3. Agents
 - **Supervisor Agent** (`agents/supervisor.py`):
     - **Model**: Claude 3.5 Haiku (via Bedrock).
     - **Role**: Router/Orchestrator. Analyzes user intent and calls the appropriate tool.
     - **Tools**: 
-        - `aws_cloudwatch_tool`: Delegates to AWS Agent.
+        - `call_agent`: Connects to AWS Agent via A2A protocol.
         - `list-mail-messages`, `send-mail`, etc.: Direct MCP tools for email.
+    - **Communication**: Uses A2A protocol to communicate with sub-agents (AWS CloudWatch Agent).
 - **AWS CloudWatch Agent** (`agents/aws.py`):
     - **Model**: Claude 3.5 Haiku.
     - **Role**: Specialist. Executes specific AWS commands.
     - **Tools**: `list_metrics`, `get_metric_statistics`, `describe_alarms`, `filter_log_events`.
+    - **Communication**: Exposed via A2A server (port 9001), called by supervisor via A2A protocol.
 
 ### 3.4. Autonomous Services
 - **Email Polling** (`core/email_polling.py`):
@@ -80,22 +88,22 @@ graph TD
 ## 4. Data Flow
 
 ### 4.1. User Interaction
-1.  **User Input**: User types a message in Streamlit.
+1.  **User Input**: User types a message in CopilotKit UI.
 2.  **UI Processing**:
-    - UI appends `session_id` to the message text.
-    - UI sends message to `http://localhost:9000/` via A2A client.
+    - CopilotKit Runtime receives the message.
+    - `HttpAgent` sends message to `http://localhost:9000/copilotkit` via AG-UI protocol.
 3.  **Server Routing**:
-    - `A2AServer` receives the request.
-    - `SessionAwareAgent` extracts `session_id` from the message (via regex).
-    - `MultiSessionManager` retrieves or creates the agent for that session.
+    - CopilotKit server (FastAPI) receives the request.
+    - `MultiSessionManager` retrieves or creates the agent for that session (from headers/query params).
 4.  **Agent Execution**:
     - **Supervisor** receives the message.
     - Supervisor plans and executes tools (AWS, Email).
-    - Results are returned up the chain.
+    - For AWS queries: Supervisor uses A2A client to call AWS Agent's A2A server.
+    - Results are returned up the chain via A2A protocol.
 5.  **Response**:
-    - Agent generates a text response.
-    - Server wraps it in an A2A `Task` object.
-    - UI receives the `Task`, extracts the text from `artifacts`, and displays it.
+    - Agent generates a text response (streamed).
+    - Server streams response via AG-UI protocol.
+    - CopilotKit UI receives and displays the streamed response.
 
 ### 4.2. Autonomous Email Polling
 1.  **Trigger**: `email_polling_loop` wakes up (default: 60s).
@@ -134,7 +142,11 @@ devops_agent/
 │   ├── email_polling.py    # Autonomous polling logic
 │   └── server.py           # A2A Server & Session logic
 ├── ui/                     # Frontend
-│   ├── app.py              # Streamlit App
+│   ├── app.py              # Streamlit App (legacy)
+│   ├── copilotkit/         # CopilotKit React/Next.js frontend
+│   │   ├── app/            # Next.js app directory
+│   │   ├── package.json    # Frontend dependencies
+│   │   └── ...
 │   └── gear_icon.svg       # UI Asset
 ├── sessions/               # Persisted session data (JSON)
 ├── main.py                 # Entry point
