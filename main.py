@@ -26,13 +26,11 @@ async def main():
     # Create server with supervisor factory
     server = AgentServer(agent_factory=create_supervisor_agent)
     
-    # Start server
+    # Start server (non-blocking, runs in separate thread)
     await server.start()
     
     # Start email polling (if configured)
-    email_task = await start_email_polling(
-        multi_session_manager=server.session_manager
-    )
+    await start_email_polling(multi_session_manager=server.session_manager)
     
     print("\n" + "=" * 60)
     print("🎯 DevOps Supervisor Agent Server Running!")

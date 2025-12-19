@@ -81,6 +81,7 @@ class AgentServer:
         self.session_manager = MultiSessionManager(agent_factory)
         self.app = FastAPI(title="DevOps Agent API", version=settings.API_VERSION)
         self.server = None
+        self.server_thread = None
         
         # Add CORS middleware for Streamlit UI
         self.app.add_middleware(
@@ -170,7 +171,7 @@ class AgentServer:
             }
     
     async def start(self):
-        """Start the FastAPI server using uvicorn"""
+        """Start the FastAPI server using uvicorn in a separate thread (non-blocking)"""
         config = uvicorn.Config(
             self.app,
             host=settings.API_HOST,
@@ -184,10 +185,27 @@ class AgentServer:
         logger.info(f"   POST /api/chat/stream - Streaming chat (SSE)")
         logger.info(f"   GET  /api/health - Health check")
         
-        await self.server.serve()
+        # Run server in a separate thread (non-blocking, like the old A2AServer implementation)
+        self.server_thread = threading.Thread(
+            target=self._run_server,
+            daemon=True,
+            name="fastapi-server"
+        )
+        self.server_thread.start()
+        # Give the server a moment to start
+        await asyncio.sleep(1)
+    
+    def _run_server(self):
+        """Run the uvicorn server (blocking, runs in separate thread)"""
+        try:
+            # Run the async server in a new event loop for this thread
+            asyncio.run(self.server.serve())
+        except Exception as e:
+            logger.error(f"FastAPI server error: {e}", exc_info=True)
     
     async def stop(self):
         """Stop the server"""
         if self.server:
             logger.info("Stopping FastAPI server...")
             self.server.should_exit = True
+            self.server_thread = None
