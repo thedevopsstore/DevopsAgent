@@ -139,21 +139,25 @@ async def initialize_subagents():
     except Exception as e:
         logger.error(f"Failed to initialize AWS A2A: {e}", exc_info=True)
     
-    # if settings.EMAIL_MCP_SERVER_URL:
-    #     try:
-    #         print(f"📧 Connecting to Email MCP: {settings.EMAIL_MCP_SERVER_URL}")
-    #         email_mcp_client = MCPClient(
-    #             lambda: streamablehttp_client(
-    #                 settings.EMAIL_MCP_SERVER_URL,
-    #                 timeout=200,
-    #                 sse_read_timeout=200
-    #             )
-    #         )
-    #         email_mcp_client.__enter__()
-    #         print("✅ Email MCP Client initialized!")
-    #     except Exception as e:
-    #         print(f"⚠️  Failed to initialize Email MCP: {e}")
-    #         email_mcp_client = None
+    # Initialize Email MCP Client
+    if settings.EMAIL_MCP_SERVER_URL:
+        try:
+            logger.info(f"📧 Connecting to Email MCP: {settings.EMAIL_MCP_SERVER_URL}")
+            email_mcp_client = MCPClient(
+                lambda: streamablehttp_client(
+                    settings.EMAIL_MCP_SERVER_URL,
+                    timeout=200,
+                    sse_read_timeout=200
+                )
+            )
+            email_mcp_client.__enter__()
+            logger.info("✅ Email MCP Client initialized!")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to initialize Email MCP: {e}")
+            email_mcp_client = None
+    else:
+        logger.info("📧 EMAIL_MCP_SERVER_URL not configured, email features disabled")
+        email_mcp_client = None
 
 async def cleanup_subagents():
     """Cleanup subagents"""
@@ -162,8 +166,12 @@ async def cleanup_subagents():
     # Stop AWS A2A server
     await aws_agent.cleanup()
     
-    # if email_mcp_client:
-    #     email_mcp_client.__exit__(None, None, None)
+    # Cleanup Email MCP Client
+    if email_mcp_client:
+        try:
+            email_mcp_client.__exit__(None, None, None)
+        except Exception as e:
+            logger.warning(f"Error cleaning up Email MCP client: {e}")
 
 def create_supervisor_agent(session_manager, conversation_manager=None) -> Agent:
     """Create the supervisor agent instance"""
